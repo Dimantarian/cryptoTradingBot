@@ -2,6 +2,7 @@ import pprint
 import tkinter as tk
 import logging
 from connectors.swyftx import swyftxClient
+from creds.creds import creds
 
 # Setup Logging
 logger = logging.getLogger()
@@ -23,7 +24,7 @@ logger.addHandler(file_handler)
 
 if __name__ == '__main__':
     # Get data
-    swyftx = swyftxClient(False, "sYsuzXoKBDyz2ZyMnOsM_G1U0XsfvB5433hQY_nV54y5_")
+    swyftx = swyftxClient(False, creds['prodPublicKey'])
     pprint.pprint(swyftx.get_balance())
     # pprint.pprint(swyftx.place_order("USD", "SOL", "5000", "USD", 1, None))
     # pprint.pprint(swyftx.get_historical_candles("SOL", "5m"))

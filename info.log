@@ -169,3 +169,4 @@
 2021-09-13 21:45:14,653 ERROR :: Error whilst making request for JWT: {'error': {'error': 'UnknownEndpoint', 'message': 'Please see our API docs at https://docs.swyftx.com.au'}} (error code 404)
 2021-09-13 21:46:57,971 INFO :: Swyftx Client successfully initialized
 2021-09-13 21:48:54,552 INFO :: Swyftx Client successfully initialized
+2021-09-14 19:27:34,975 INFO :: Swyftx Client successfully initialized
