@@ -3,19 +3,19 @@ import pprint
 import time
 import json
 import datetime
-
+from creds.creds import creds
 import requests
 
 logger = logging.getLogger()
 
 
-class swyftxClient:
-    def __init__(self, testnet,public_key):
+class SwyftxClient:
+    def __init__(self, testnet, public_key):
         self.data = {'apiKey': public_key, 'Content-Type': 'application/json'}
 
         if testnet:
             self.base_url = 'https://api.demo.swyftx.com.au'
-            self.token = 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6IlJrVTRRelF6TlRaQk5rTkNORGsyTnpnME9EYzNOVEZGTWpaRE9USTRNalV6UXpVNE1UUkROUSJ9.eyJodHRwczovL3N3eWZ0eC5jb20uYXUvLWp0aSI6ImY5ZTQ5OGQ0LTEzMmItNGE4NS1iZTEzLTdjNTVmMGRmN2FjYSIsImh0dHBzOi8vc3d5ZnR4LmNvbS5hdS8tbWZhX2VuYWJsZWQiOnRydWUsImh0dHBzOi8vc3d5ZnR4LmNvbS5hdS8tY291bnRyeV9uYW1lIjoiQXVzdHJhbGlhIiwiaHR0cHM6Ly9zd3lmdHguY29tLmF1Ly1jaXR5X25hbWUiOiJTeWRuZXkiLCJpc3MiOiJodHRwczovL3N3eWZ0eC5hdS5hdXRoMC5jb20vIiwic3ViIjoiYXV0aDB8NjBhMmZiYTE2MzAyYzYwMDY5M2ZmY2M5IiwiYXVkIjoiaHR0cHM6Ly9hcGkuc3d5ZnR4LmNvbS5hdS8iLCJpYXQiOjE2MzE1MzMyNjgsImV4cCI6MTYzMjEzODA2OCwiYXpwIjoiRVF3M2ZhQXhPVGhSWVRaeXkxdWxaRGk4REhSQVlkRU8iLCJzY29wZSI6ImFwcC5hY2NvdW50LnRheC1yZXBvcnQgYXBwLmFjY291bnQuYmFsYW5jZSBhcHAuYWNjb3VudC5yZWFkIGFwcC5hZGRyZXNzLnJlYWQgYXBwLmZ1bmRzLnJlYWQgYXBwLm9yZGVycyBhcHAub3JkZXJzLmNyZWF0ZSBhcHAub3JkZXJzLmRlbGV0ZSBhcHAub3JkZXJzLnJlYWQgYXBwLm9yZGVycy5kdXN0IG9mZmxpbmVfYWNjZXNzIiwiZ3R5IjoicGFzc3dvcmQifQ.OXp-VvsRkaf7VOpV5lPA1qGb2GZ28wXDFfg9mhGc7vQqwtfJ1sZI5OXDloJdKvXOWRY9OWFvRfe0rBaI0TQm0tAwkK6yCa4p4LY7FyoIsq_7GQ5hAIEyqr9PKDMXAh6Wyy2DUdoevFiM-ESZrsrpUhmL4s3urq8zvp2I_pjFKa1XTiDKtm81sniJ1YORNIFCkIjah8Ac2I-nCgrUihaV-KgXxhSrkurPswnxX5Nq41KTO4JkugUbRrGETHi3WG-kaeFgiBFFtbNyrHxt0_OSVBvMoaGxFFNS9MMNWUcMAxhofkr-veUbEHZpVhPUspeVrm55YoTJfZyia4-LGjsh_g'
+            self.token = creds['demoPrivateKey']
         else:
             self.base_url = 'https://api.swyftx.com.au'
 
@@ -33,8 +33,7 @@ class swyftxClient:
             self.token = retrieve_jwt()
 
         self.prices = dict()
-
-        self.header = {'Content-Type':'application/json',
+        self.header = {'Content-Type': 'application/json',
                        'Authorization': 'Bearer ' + self.token}
 
         logger.info("Swyftx Client successfully initialized")
@@ -57,24 +56,35 @@ class swyftxClient:
             return None
 
     # Data methods that call public endpoints
-    def get_contracts(self):
+    def get_assets(self):
+        """Retrieves all the assets currently listed on Swyftx, including basic
+           information about the market cap, 24hr volume, and IDs"""
         exchange_info = self.make_request("GET", "/markets/assets/", None, None)
+        assets = []
         if exchange_info is not None:
-            assets = []
             for asset in exchange_info:
-                assets.append({'assetId': asset['id'], 'assetCode': asset['code']})
+                try:
+                    assets.append(self.make_request("GET", "/markets/info/basic/" + asset['code'], None, None)[0])
+                    time.sleep(0.1)
+                except TypeError:
+                    logger.warning("WARNING: No info available for", asset['code'])
+        else:
+            logger.error("ERROR: No results returned from API")
         return assets
 
-    def get_historical_candles(self, symbol, resolution):
+    def get_historical_candles(self, symbol, resolution, start, end):  # TBD: implement start and end date
+        """Retrieves the historical OHLC data against AUD for the given symbol, at the specified resolution.
+           Currently pulls all data from the last 24 hours"""
         data = dict()
         data['baseAsset'] = "AUD"
         data['secondaryAsset'] = symbol
-        data['timeStart'] = 1000 * int(datetime.datetime.utcnow().timestamp()) - 3600000
+        data['timeStart'] = 1000 * int(datetime.datetime.utcnow().timestamp()) - 86400000
         data['timeEnd'] = 1000 * int(datetime.datetime.utcnow().timestamp())
         data['resolution'] = resolution
         data['limit'] = 1000
 
         raw_candles = self.make_request("GET", "/charts/getBars/AUD/" + symbol + "/ask/", data, None)['candles']
+        pprint.pprint(raw_candles)
         candles = []
 
         if raw_candles is not None:
@@ -85,7 +95,8 @@ class swyftxClient:
         return candles
 
     def get_bid_ask(self, symbol):
-        bid_ask_info = self.make_request("GET", "/markets/info/basic/"+symbol+"/",data=None, header=None)[0]
+        """Given an asset, return the current bid-ask"""
+        bid_ask_info = self.make_request("GET", "/markets/info/basic/"+symbol+"/", data=None, header=None)[0]
         # pprint.pprint(bid_ask_info[0]['buy'])
         asset_data = dict()
         asset_data['symbol'] = symbol
@@ -107,17 +118,30 @@ class swyftxClient:
         if response is not None:
             for a in response:
                 balances[a['assetId']] = a
-        pprint.pprint(balances)
+        # pprint.pprint(balances)
         return balances
 
-    def place_order(self, primary, secondary, quantity, assetQuantity, orderType, trigger):
-
+    def place_order(self, primary, secondary, quantity, asset_quantity, order_type, trigger):
+        """Places an order based on the input parameters. Note the following for orderType:
+           1: Market Buy
+           2: Market Sell
+           3: Limit Buy : Buys secondary asset when price DROPS to trigger price
+           4: Limit Sell : Sells secondary asset when price RISES to trigger price
+           5: Stop Limit Buy : Buys secondary asset if price RISES to trigger price
+           6: Stop Limit Sell : Sells secondary asset if price DROPS to trigger price
+           8: Dust Sell
+            Note for Trigger: Price to trigger order at.
+                For limit and stop buy orders (orderType: LIMIT_BUY,STOP_LIMIT_BUY), price is primary per secondary.
+                e.g. 52000 USD/BTC -> trigger: 52000.
+                For limit and stop sell orders (orderType: LIMIT_SELL,STOP_LIMIT_SELL), price is secondary per primary.
+                e.g. 1 BTC / 52000 USD -> trigger: 0.0000192307.
+        """
         order_data = dict()
         order_data["primary"] = primary  # "USD"
         order_data["secondary"] = secondary  # "BTC"
         order_data["quantity"] = quantity  # "1000"
-        order_data["assetQuantity"] = assetQuantity  # "USD"
-        order_data["orderType"] = orderType  # 0
+        order_data["assetQuantity"] = asset_quantity  # "USD"
+        order_data["orderType"] = order_type  # 0
         order_data["trigger"] = trigger  # "52000"
 
         response = self.make_request("POST", "/orders/", data=json.dumps(order_data), header=self.header)
