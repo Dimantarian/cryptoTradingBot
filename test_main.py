@@ -1,3 +1,5 @@
+# This file is for testing functionality before adding to main.py
+
 import pprint
 import tkinter as tk
 import logging
@@ -21,10 +23,15 @@ file_handler.setLevel(logging.DEBUG)
 logger.addHandler(stream_handler)
 logger.addHandler(file_handler)
 
-
 if __name__ == '__main__':
     # Get data
     swyftx = SwyftxClient(False, creds['demoPublicKey'])
+    pprint.pprint(swyftx.get_balance())
+    # pprint.pprint(swyftx.place_order("USD", "SOL", "5000", "USD", 1, None))
+    pprint.pprint(swyftx.get_historical_candles("BTC", "1h", None, None))
+    pprint.pprint(swyftx.get_bid_ask("BTC"))
+
+    # pprint.pprint(swyftx.get_assets())
 
     # Instantiate a TK object (application)
     root = tk.Tk()
