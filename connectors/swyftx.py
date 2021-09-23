@@ -1,27 +1,29 @@
 import logging
 import pprint
 import time
+import typing
 import json
 import datetime
 from creds.creds import creds
+from models.models import *
 import requests
 
 logger = logging.getLogger()
 
 
 class SwyftxClient:
-    def __init__(self, testnet, public_key):
-        self.data = {'apiKey': public_key, 'Content-Type': 'application/json'}
+    def __init__(self, testnet: bool, public_key: str):
+        self._data = {'apiKey': public_key, 'Content-Type': 'application/json'}
 
         if testnet:
-            self.base_url = 'https://api.demo.swyftx.com.au'
-            self.token = creds['demoPrivateKey']
+            self._base_url = 'https://api.demo.swyftx.com.au'
+            self._token = creds['demoPrivateKey']
         else:
-            self.base_url = 'https://api.swyftx.com.au'
+            self._base_url = 'https://api.swyftx.com.au'
 
-            def retrieve_jwt():
+            def _retrieve_jwt():
                 # Generates a jwt that will be active for 1 week with the permissions associated with API Key
-                response = requests.post(self.base_url + '/auth/refresh/', data=self.data)
+                response = requests.post(self._base_url + '/auth/refresh/', data=self._data)
 
                 if response.status_code == 200:
                     return response.json()['accessToken']
@@ -30,21 +32,25 @@ class SwyftxClient:
                                  response.json(), response.status_code)
                     return None
 
-            self.token = retrieve_jwt()
+            self._token = _retrieve_jwt()
 
         self.prices = dict()
-        self.header = {'Content-Type': 'application/json',
-                       'Authorization': 'Bearer ' + self.token}
+        self.orders = dict()
+        self._header = {'Content-Type': 'application/json',
+                       'Authorization': 'Bearer ' + self._token}
+
+        self.assets = self.get_assets()
+        self.balances = self.get_balance()
 
         logger.info("Swyftx Client successfully initialized")
 
-    def make_request(self, method, endpoint, data, header):
+    def _make_request(self, method, endpoint, data, header):
         if method == "GET":
-            response = requests.get(self.base_url + endpoint, params=data, headers=self.header)
+            response = requests.get(self._base_url + endpoint, params=data, headers=self._header)
         elif method == "POST":
-            response = requests.post(self.base_url + endpoint, data=data, headers=self.header)
+            response = requests.post(self._base_url + endpoint, data=data, headers=self._header)
         elif method == "DELETE":
-            response = requests.delete(self.base_url + endpoint, data=data, headers=self.header)
+            response = requests.delete(self._base_url + endpoint, data=data, headers=self._header)
         else:
             raise ValueError()
 
@@ -56,21 +62,16 @@ class SwyftxClient:
             return None
 
     # Data methods that call public endpoints
-    def get_assets(self):
+    def get_assets(self) -> typing.Dict[str, Asset]:
         """Retrieves all the assets currently listed on Swyftx, including basic
            information about the market cap, 24hr volume, and IDs"""
-        exchange_info = self.make_request("GET", "/markets/assets/", None, None)
-        assets = []
-        if exchange_info is not None:
-            for asset in exchange_info:
-                try:
-                    assets.append(self.make_request("GET", "/markets/info/basic/" + asset['code'], None, None)[0])
-                    time.sleep(0.1)
-                except TypeError:
-                    logger.warning("WARNING: No info available for", asset['code'])
-        else:
-            logger.error("ERROR: No results returned from API")
-        return assets
+        asset_attributes = dict()
+        response = self._make_request("GET", "/markets/assets/", None, None)
+        if response is not None:
+            for asset in response:
+                if asset['tradable'] == 1 and asset['buyDisabled'] == 0 and asset['assetType'] == 2:
+                    asset_attributes[asset['code']] = Asset(asset)
+        return asset_attributes
 
     def get_historical_candles(self, symbol, resolution, start, end):  # TBD: implement start and end date
         """Retrieves the historical OHLC data against AUD for the given symbol, at the specified resolution.
@@ -83,7 +84,7 @@ class SwyftxClient:
         data['resolution'] = resolution
         data['limit'] = 1000
 
-        raw_candles = self.make_request("GET", "/charts/getBars/AUD/" + symbol + "/ask/", data, None)['candles']
+        raw_candles = self._make_request("GET", "/charts/getBars/AUD/" + symbol + "/ask/", data, None)['candles']
         pprint.pprint(raw_candles)
         candles = []
 
@@ -96,7 +97,7 @@ class SwyftxClient:
 
     def get_bid_ask(self, symbol):
         """Given an asset, return the current bid-ask"""
-        bid_ask_info = self.make_request("GET", "/markets/info/basic/"+symbol+"/", data=None, header=None)[0]
+        bid_ask_info = self._make_request("GET", "/markets/info/basic/"+symbol+"/", data=None, header=None)[0]
         # pprint.pprint(bid_ask_info[0]['buy'])
         asset_data = dict()
         asset_data['symbol'] = symbol
@@ -110,14 +111,20 @@ class SwyftxClient:
 
         return self.prices[symbol]
 
-    def get_balance(self):
+    # Methods that interact with a private endpoint
+    def get_balance(self) -> typing.Dict[str, Balance]:
         """Returns the balances in an account for each asset
         Note: returns the assetId, not the asset Name"""
         balances = dict()
-        response = self.make_request("GET", "/user/balance/", None, self.header)
+        response = self._make_request("GET", "/user/balance/", None, self._header)
+
         if response is not None:
-            for a in response:
-                balances[a['assetId']] = a
+            for a in self.assets.values():
+                for b in response:
+                    if a.assetId == b['assetId']:
+                        b['symbol'] = a.symbol
+                        balances[a.symbol] = Balance(b)
+
         # pprint.pprint(balances)
         return balances
 
@@ -144,12 +151,39 @@ class SwyftxClient:
         order_data["orderType"] = order_type  # 0
         order_data["trigger"] = trigger  # "52000"
 
-        response = self.make_request("POST", "/orders/", data=json.dumps(order_data), header=self.header)
-        # pprint.pprint(response.json())
-        return response
+        place_order = self._make_request("POST", "/orders/", data=json.dumps(order_data), header=self._header)
+        # pprint.pprint(place_order)
+        # TODO: Work out if the order info can be returned outside of prod mode, demo seems to just return
+        #       the order orderUuid
+        # if place_order is not None:
+        #     if place_order['orderUuid'] not in self.orders:
+        #         self.orders[place_order['orderUuid']] = {'order_id': place_order['orderUuid'],
+        #                                                  'order_info': place_order['order']}
+        #     else:
+        #         self.orders[place_order['orderUuid']]['order_id'] = place_order['orderUuid']
+        #         self.orders[place_order['orderUuid']]['order_info'] = place_order['order']
+        # #pprint.pprint(self.orders[place_order['orderUuid']])
+        return None  # self.orders[place_order['orderUuid']]
 
-    def cancel_order(self):
-        return
-    #
-    # def get_order_status(self):
-    #     return
+    def cancel_order(self, order_id):
+        cancellation = self._make_request("DELETE", "/orders/" + order_id + "/", data=None, header=self._header)
+        print(cancellation)
+        if cancellation.status_code == 200:
+            logger.info("INFO: Order %s was successfully Cancelled", order_id)
+        return None
+
+    def get_order_status(self, order_id):
+        """Returns the """
+        order_status = self._make_request("GET", "/orders/byId/" + order_id + "/", data=None, header=self._header)
+        # TODO: cherry pick the data that's most relevant
+        # order_details = dict()
+        #
+        # if order_status is not None:
+        #     order_details['order_id'] = order_status['orderUuid']
+        #     order_details['order_status'] = ...
+        return order_status
+
+    def get_all_orders(self, symbol):  # TODO: Implement logic to subset by order status / value
+        all_orders = self._make_request("GET", "/orders/" + symbol, data=None, header=self._header)
+        return all_orders
+
