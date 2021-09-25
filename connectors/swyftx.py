@@ -1,11 +1,8 @@
 import logging
-import pprint
-import time
 import typing
 import json
 import datetime
-from creds.creds import creds
-from models.models import *
+from models import *
 import requests
 
 logger = logging.getLogger()
@@ -15,36 +12,38 @@ class SwyftxClient:
     def __init__(self, testnet: bool, public_key: str):
         self._data = {'apiKey': public_key, 'Content-Type': 'application/json'}
 
+        # JWT cannot be retrieved using the test api
+        def _retrieve_jwt():
+            # Generates a jwt that will be active for 1 week with the permissions associated with API Key
+            response = requests.post('https://api.swyftx.com.au/auth/refresh/', data=self._data)
+
+            if response.status_code == 200:
+                return response.json()['accessToken']
+            else:
+                logger.error("Error whilst making request for JWT: %s (error code %s)",
+                             response.json(), response.status_code)
+                return None
+
+        self._token = _retrieve_jwt()
+
         if testnet:
             self._base_url = 'https://api.demo.swyftx.com.au'
-            self._token = creds['demoPrivateKey']
+            # self._token = creds['demoPrivateKey']
         else:
             self._base_url = 'https://api.swyftx.com.au'
 
-            def _retrieve_jwt():
-                # Generates a jwt that will be active for 1 week with the permissions associated with API Key
-                response = requests.post(self._base_url + '/auth/refresh/', data=self._data)
-
-                if response.status_code == 200:
-                    return response.json()['accessToken']
-                else:
-                    logger.error("Error whilst making request for JWT: %s (error code %s)",
-                                 response.json(), response.status_code)
-                    return None
-
-            self._token = _retrieve_jwt()
 
         self.prices = dict()
         self.orders = dict()
         self._header = {'Content-Type': 'application/json',
-                       'Authorization': 'Bearer ' + self._token}
+                        'Authorization': 'Bearer ' + self._token}
 
         self.assets = self.get_assets()
         self.balances = self.get_balance()
 
         logger.info("Swyftx Client successfully initialized")
 
-    def _make_request(self, method, endpoint, data, header):
+    def _make_request(self, method: str, endpoint: str, data: typing.Dict):
         if method == "GET":
             response = requests.get(self._base_url + endpoint, params=data, headers=self._header)
         elif method == "POST":
@@ -66,14 +65,15 @@ class SwyftxClient:
         """Retrieves all the assets currently listed on Swyftx, including basic
            information about the market cap, 24hr volume, and IDs"""
         asset_attributes = dict()
-        response = self._make_request("GET", "/markets/assets/", None, None)
+        response = self._make_request("GET", "/markets/assets/", dict())
         if response is not None:
             for asset in response:
                 if asset['tradable'] == 1 and asset['buyDisabled'] == 0 and asset['assetType'] == 2:
                     asset_attributes[asset['code']] = Asset(asset)
         return asset_attributes
 
-    def get_historical_candles(self, symbol, resolution, start, end):  # TBD: implement start and end date
+    def get_historical_candles(self, symbol: str, resolution: str, start, end) -> list[Candles]:
+        # TODO: implement start and end date
         """Retrieves the historical OHLC data against AUD for the given symbol, at the specified resolution.
            Currently pulls all data from the last 24 hours"""
         data = dict()
@@ -84,20 +84,19 @@ class SwyftxClient:
         data['resolution'] = resolution
         data['limit'] = 1000
 
-        raw_candles = self._make_request("GET", "/charts/getBars/AUD/" + symbol + "/ask/", data, None)['candles']
-        pprint.pprint(raw_candles)
+        raw_candles = self._make_request("GET", "/charts/getBars/AUD/" + symbol + "/ask/", data)['candles']
+        #pprint.pprint(raw_candles)
         candles = []
 
         if raw_candles is not None:
             for c in raw_candles:
                 # pprint.pprint(c)
-                candles.append([float(c['close']), float(c['high']), float(c['low']), float(c['open']),
-                                c['time'], c['volume']])
+                candles.append(Candles(c))
         return candles
 
-    def get_bid_ask(self, symbol):
+    def get_bid_ask(self, symbol: str) -> typing.Dict:
         """Given an asset, return the current bid-ask"""
-        bid_ask_info = self._make_request("GET", "/markets/info/basic/"+symbol+"/", data=None, header=None)[0]
+        bid_ask_info = self._make_request("GET", "/markets/info/basic/"+symbol+"/", dict())[0]
         # pprint.pprint(bid_ask_info[0]['buy'])
         asset_data = dict()
         asset_data['symbol'] = symbol
@@ -116,7 +115,7 @@ class SwyftxClient:
         """Returns the balances in an account for each asset
         Note: returns the assetId, not the asset Name"""
         balances = dict()
-        response = self._make_request("GET", "/user/balance/", None, self._header)
+        response = self._make_request("GET", "/user/balance/", dict())
 
         if response is not None:
             for a in self.assets.values():
@@ -125,10 +124,11 @@ class SwyftxClient:
                         b['symbol'] = a.symbol
                         balances[a.symbol] = Balance(b)
 
-        # pprint.pprint(balances)
+        # print(f"your ADA balance is: {balances['ADA'].balance}")
         return balances
 
-    def place_order(self, primary, secondary, quantity, asset_quantity, order_type, trigger):
+    def place_order(self, primary: str, secondary: str, quantity: str, asset_quantity: str, order_type: int,
+                    trigger: str):
         """Places an order based on the input parameters. Note the following for orderType:
            1: Market Buy
            2: Market Sell
@@ -151,7 +151,7 @@ class SwyftxClient:
         order_data["orderType"] = order_type  # 0
         order_data["trigger"] = trigger  # "52000"
 
-        place_order = self._make_request("POST", "/orders/", data=json.dumps(order_data), header=self._header)
+        place_order = self._make_request("POST", "/orders/", data=json.dumps(order_data))
         # pprint.pprint(place_order)
         # TODO: Work out if the order info can be returned outside of prod mode, demo seems to just return
         #       the order orderUuid
@@ -165,16 +165,16 @@ class SwyftxClient:
         # #pprint.pprint(self.orders[place_order['orderUuid']])
         return None  # self.orders[place_order['orderUuid']]
 
-    def cancel_order(self, order_id):
+    def cancel_order(self, order_id: str):
         cancellation = self._make_request("DELETE", "/orders/" + order_id + "/", data=None, header=self._header)
         print(cancellation)
         if cancellation.status_code == 200:
             logger.info("INFO: Order %s was successfully Cancelled", order_id)
         return None
 
-    def get_order_status(self, order_id):
+    def get_order_status(self, order_id: str) -> OrderStatus:
         """Returns the """
-        order_status = self._make_request("GET", "/orders/byId/" + order_id + "/", data=None, header=self._header)
+        order_status = OrderStatus(self._make_request("GET", "/orders/byId/" + order_id + "/", data=dict()))
         # TODO: cherry pick the data that's most relevant
         # order_details = dict()
         #
@@ -183,7 +183,8 @@ class SwyftxClient:
         #     order_details['order_status'] = ...
         return order_status
 
-    def get_all_orders(self, symbol):  # TODO: Implement logic to subset by order status / value
-        all_orders = self._make_request("GET", "/orders/" + symbol, data=None, header=self._header)
+    def get_all_orders(self, symbol: str) -> typing.Dict:
+        # TODO: Implement logic to subset by order status / value
+        all_orders = self._make_request("GET", "/orders/" + symbol, data=dict())
         return all_orders
 
