@@ -20,10 +20,16 @@ class BTCMarketsClient:
         self.ws = None
         self.prices = dict()
 
+        self.logs = []
+
         t = threading.Thread(target=self.start_ws)
         t.start()
 
         logger.info("BTCMarkets Client successfully initialized")
+
+    def _add_log(self, msg: str):
+        logger.info("%s", msg)
+        self.logs.append({"log": msg, "displayed": False})
 
     def start_ws(self):
         self.ws = websocket.WebSocketApp(self.wss_url, on_open=self.on_open, on_message=self.on_message,
@@ -46,10 +52,15 @@ class BTCMarketsClient:
             if data['messageType'] == "tick":
                 if data['marketId'] not in self.prices:
                     self.prices[data['marketId']] = {'bid': float(data['bestBid']), 'ask': float(data['bestAsk'])}
+                    self._add_log(data['marketId'] + ": " +
+                                  str(self.prices[data['marketId']]['bid']) + " / " +
+                                  str(self.prices[data['marketId']]['ask']))
                 else:
                     self.prices[data['marketId']]['bid'] = float(data['bestBid'])
                     self.prices[data['marketId']]['ask'] = float(data['bestAsk'])
-                print(self.prices)
+                    self._add_log(data['marketId'] + ": " +
+                                    str(self.prices[data['marketId']]['bid']) + " / " +
+                                    str(self.prices[data['marketId']]['ask']))
 
     def subscribe_channel(self, symbol, channels):
         data = {'messageType': 'subscribe', 'marketIds': [symbol], 'channels': channels}

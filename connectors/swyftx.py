@@ -32,7 +32,6 @@ class SwyftxClient:
         else:
             self._base_url = 'https://api.swyftx.com.au'
 
-
         self.prices = dict()
         self.orders = dict()
         self._header = {'Content-Type': 'application/json',
@@ -40,8 +39,13 @@ class SwyftxClient:
 
         self.assets = self.get_assets()
         self.balances = self.get_balance()
+        self.logs = []
 
         logger.info("Swyftx Client successfully initialized")
+
+    def _add_log(self, msg: str):
+        logger.info(msg)
+        self.logs.append({"log": msg, "displayed": False})
 
     def _make_request(self, method: str, endpoint: str, data: typing.Dict):
         if method == "GET":
@@ -104,6 +108,8 @@ class SwyftxClient:
         if bid_ask_info is not None:
             if symbol not in self.prices:
                 self.prices[symbol] = {'bid': float(bid_ask_info['buy']), 'ask': float(bid_ask_info['sell'])}
+                self._add_log(symbol + " " + str(self.prices[symbol]['bid']) + " / " +
+                                                 str(self.prices[symbol]['sell']))
             else:
                 self.prices[symbol]['bid'] = float(bid_ask_info['buy'])
                 self.prices[symbol]['ask'] = float(bid_ask_info['sell'])
